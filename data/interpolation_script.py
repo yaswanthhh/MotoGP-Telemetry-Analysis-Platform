@@ -1,49 +1,37 @@
 import pandas as pd
 
+# Load your telemetry data
 df = pd.read_csv("MOTOGP18_raw_1.csv", sep="\t")
 df["lap_time"] = df["lap_time"].astype(float)
 
-lap_offset = 0
-resampled_laps = []
+# Identify numeric and non-numeric columns
+numeric_cols = ["gforce_X", "gforce_Y", "gforce_Z"] + list(
+    df.select_dtypes(include=["number"]).columns.difference(["lap_time", "lap_number", "gforce_X", "gforce_Y", "gforce_Z"])
+)
+non_numeric_cols = df.select_dtypes(exclude=["number"]).columns
+
+interpolated_laps = []
 
 for lap_num, lap_df in df.groupby("lap_number"):
-    # Convert lap_time to Timedelta and offset
-    lap_df["lap_time"] = pd.to_timedelta(lap_df["lap_time"], unit="s")
-    lap_df["lap_time"] += pd.to_timedelta(lap_offset, unit="s")
+    # Drop duplicate lap_time by averaging only numeric columns
+    numeric_part = lap_df[["lap_time"] + list(numeric_cols)].groupby("lap_time").mean().reset_index()
 
-    # Drop duplicate timestamps
-    lap_df = lap_df.drop_duplicates(subset="lap_time")
+    # Interpolate numeric data
+    numeric_part.set_index("lap_time", inplace=True)
+    numeric_part = numeric_part.interpolate(method="linear").reset_index()
 
-    # Set index
-    lap_df.set_index("lap_time", inplace=True)
+    # Forward-fill non-numeric columns from first valid row
+    static_values = lap_df[non_numeric_cols].iloc[0]
+    for col in non_numeric_cols:
+        numeric_part[col] = static_values[col]
 
-    # Split numeric and non-numeric columns
-    numeric_cols = lap_df.select_dtypes(include=["number"]).columns
-    non_numeric_cols = lap_df.select_dtypes(exclude=["number"]).columns
-
-    # Resample numeric data
-    numeric_resampled = lap_df[numeric_cols].resample("10ms").interpolate(method="linear")
-
-    # Forward-fill non-numeric data (e.g., carId, trackId)
-    non_numeric_resampled = lap_df[non_numeric_cols].resample("10ms").ffill()
-
-    # Combine both
-    resampled = pd.concat([numeric_resampled, non_numeric_resampled], axis=1)
-    resampled["lap_number"] = lap_num
-    resampled_laps.append(resampled)
-
-    # Update offset
-    lap_offset += lap_df.index.max().total_seconds() + 1
+    # Add lap_number back
+    numeric_part["lap_number"] = lap_num
+    interpolated_laps.append(numeric_part)
 
 # Combine all laps
-resampled_df = pd.concat(resampled_laps).reset_index()
-resampled_df["lap_time"] = resampled_df["lap_time"].dt.total_seconds().round(3)
-
-# Combine all laps
-resampled_df = pd.concat(resampled_laps).reset_index()
-
-# Convert lap_time back to seconds for readability
-resampled_df["lap_time"] = resampled_df["lap_time"].dt.total_seconds().round(3)
+interpolated_df = pd.concat(interpolated_laps, ignore_index=True)
 
 # Save to CSV
-resampled_df.to_csv("MOTOGP18_resampled_100Hz.csv", index=False)
+interpolated_df.to_csv("MOTOGP18_interpolated_by_time.csv", index=False)
+print("✅ Interpolated telemetry saved to MOTOGP18_interpolated_by_time.csv")
