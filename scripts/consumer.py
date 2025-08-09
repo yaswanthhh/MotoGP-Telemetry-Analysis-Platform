@@ -1,7 +1,8 @@
 from kafka import KafkaConsumer
 import json
-import math
+import pandas as pd
 
+# Initialize Kafka consumer
 consumer = KafkaConsumer(
     'motogp-telemetry',
     bootstrap_servers='localhost:9092',
@@ -16,17 +17,8 @@ print("📡 Listening to motogp-telemetry stream...\n")
 for message in consumer:
     data = message.value
 
-    # Extract and map fields
-    lap_time = data.get("lap_time", 0)
-    speed = data.get("wheel_speed_0", "N/A")
-    throttle = data.get("throttle", "N/A")
-    brake = data.get("brake_0", "N/A")
-    lap = data.get("lap_number", "N/A")
+    # ✅ Convert to single-row DataFrame
+    df_row = pd.DataFrame([data])
 
-    # Compute g-force magnitude
-    gx = data.get("gforce_X", 0)
-    gy = data.get("gforce_Y", 0)
-    gz = data.get("gforce_Z", 0)
-    g_force = round(math.sqrt(gx**2 + gy**2 + gz**2), 2)
-
-    print(f"Lap {lap} | Time: {lap_time:.3f}s | Speed: {speed} km/h | Throttle: {throttle}% | Brake: {brake}% | G-Force: {g_force}")
+    # ✅ Print all columns in a readable format
+    print(df_row.to_string(index=False))
