@@ -1,69 +1,61 @@
+import pandas as pd
 import time
-import random
-import csv
-from datetime import datetime
 
-# Configuration
-OUTPUT_FILE = "data/advanced_telemetry.csv"
-SIMULATION_DURATION = 60  # seconds
-INTERVAL = 1  # seconds
-RIDERS = ["A.Marquez", "V.Rossi", "M.Marquez"]  # Example rider IDs
+# Path to your CSV
+csv_path = "data/SachenRing_M1_Rossi.csv"
 
-# Helper functions
-def get_gear(speed):
-    if speed < 40: return 1
-    elif speed < 80: return 2
-    elif speed < 130: return 3
-    elif speed < 180: return 4
-    elif speed < 240: return 5
-    else: return 6
+# Read CSV with SEMICOLON separator
+df = pd.read_csv(csv_path, sep=';')
 
-def get_sector(elapsed):
-    return f"Sector {((elapsed // 10) % 3) + 1}"
+print("Column names in the CSV:")
+print(df.columns.tolist())
+print("\n" + "=" * 80 + "\n")
 
-def generate_telemetry(rider_id, lap, elapsed):
-    speed = round(random.uniform(80, 340), 2)
-    rpm = random.randint(8000, 18000)
-    throttle = round(random.uniform(0, 100), 2)
-    lean = round(random.uniform(-60, 60), 2)
+# Clean -1 values to NaN
+df.replace(-1, pd.NA, inplace=True)
 
-    return {
-        "timestamp": datetime.utcnow().isoformat(),
-        "rider_id": rider_id,
-        "lap": lap,
-        "sector": get_sector(elapsed),
-        "speed_kph": speed,
-        "rpm": rpm,
-        "gear": get_gear(speed),
-        "throttle_pct": throttle,
-        "brake_pressure": round(random.uniform(0, 100), 2),
-        "lean_angle_deg": lean,
-        "gps_lat": round(random.uniform(43.5, 43.6), 6),
-        "gps_long": round(random.uniform(-0.3, -0.2), 6),
-        "tire_temp_c": round(random.uniform(60, 120), 2),
-        "engine_temp_c": round(70 + (rpm - 8000) / 200, 2),
-        "front_susp_mm": round(random.uniform(10, 120), 2),
-        "rear_susp_mm": round(random.uniform(10, 120), 2),
-        "wheel_slip_pct": round(min(100, abs(lean) * throttle / 100), 2)
-    }
+# Convert total_time to numeric (in case it's read as string)
+df['total_time'] = pd.to_numeric(df['total_time'], errors='coerce')
 
-# Write header
-with open(OUTPUT_FILE, mode='w', newline='') as file:
-    writer = csv.DictWriter(file, fieldnames=generate_telemetry(RIDERS[0], 1, 0).keys())
-    writer.writeheader()
+# Filter out rows where validBin = 0 (invalid data)
+df = df[df['validBin'] == 1].reset_index(drop=True)
 
-    print(f"Starting advanced telemetry simulation for {SIMULATION_DURATION} seconds...")
-    start_time = time.time()
+# Sort by total_time to ensure chronological order
+df = df.sort_values('total_time').reset_index(drop=True)
 
-    while time.time() - start_time < SIMULATION_DURATION:
-        elapsed = int(time.time() - start_time)
-        lap = (elapsed // 20) + 1  # New lap every 20 seconds
+print("First 5 rows of valid data:")
+print(df.head())
+print("\n" + "=" * 80 + "\n")
 
-        for rider in RIDERS:
-            data = generate_telemetry(rider, lap, elapsed)
-            writer.writerow(data)
-            print(data)
+# Simulation speed multiplier
+SPEED = 1  # Higher is faster, 1 is real time
 
-        time.sleep(INTERVAL)
+print(f"Starting MotoGP Telemetry data stream (Speed: {SPEED}x)...\n")
 
-print(f"Simulation complete. Data saved to {OUTPUT_FILE}")
+# STEP 3: Stream the data
+for idx, row in df.iterrows():
+    # Display telemetry info
+    print(f"[Lap {row['lapNum']}] {row['carId']} | "
+          f"Speed: {row['velocity_X']:.2f} m/s | "
+          f"RPM: {row['rpm']:.0f} | "
+          f"Gear: {row['gear']} | "
+          f"Throttle: {row['throttle']:.1f}% | "
+          f"Brake: {row['brake_0']:.1f} | "
+          f"Time: {row['total_time']:.3f}s")
+
+    # Calculate delay based on time difference
+    if idx < len(df) - 1:
+        t_now = row['total_time']
+        t_next = df.loc[idx + 1, 'total_time']
+
+        # Only sleep if both times are valid
+        if pd.notna(t_now) and pd.notna(t_next):
+            sleep_time = max((t_next - t_now) / SPEED, 0.001)
+            time.sleep(sleep_time)
+        else:
+            time.sleep(0.01)
+    else:
+        time.sleep(0.01)
+
+print("\n" + "=" * 80)
+print("Stream complete!")
